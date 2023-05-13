@@ -1,6 +1,7 @@
 use dotenvy::dotenv;
 use filters::register_filter;
-use information_schema::{load_database, Table};
+use information_schema::load_database;
+use table::Table;
 use tera::{Context, Tera};
 
 pub mod filters;
@@ -49,7 +50,7 @@ async fn main() -> anyhow::Result<()> {
 
         std::fs::write(
             format!(
-                "E:/Projects/plataforma-rs/platform-application/src/repository/models/{}_gen.rs",
+                "E:/Projects/plataforma-rs/platform-application/lib/repository/src/models/{}_gen.rs",
                 table.name
             ),
             output,
@@ -60,7 +61,7 @@ async fn main() -> anyhow::Result<()> {
 
         std::fs::write(
             format!(
-                "E:/Projects/plataforma-rs/platform-application/src/repository/repositories/{}_repository_gen.rs",
+                "E:/Projects/plataforma-rs/platform-application/lib/repository/src/repositories/{}_repository_gen.rs",
                 table.name
             ),
             output,

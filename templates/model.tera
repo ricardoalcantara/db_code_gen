@@ -11,8 +11,8 @@ pub struct {{ table.name | as_upper_camel_case}} {
 #[rustfmt::skip]
 impl {{ table.name | as_upper_camel_case }} {
     pub fn new(
-{%- if table.primary_keys | length > 1 %}
-    {%- for column in table.primary_keys %}
+{%- if table.primary_key_columns | length > 1 %}
+    {%- for column in table.primary_key_columns %}
         {{column.name}}: {{column.data_type | to_rust_type(is_nullable=column.is_nullable) }},
     {%- endfor %}
 {%- endif %}
@@ -23,12 +23,12 @@ impl {{ table.name | as_upper_camel_case }} {
 {%- endfor %}
     ) -> {{ table.name | as_upper_camel_case }} {
         {{ table.name | as_upper_camel_case }} {
-{%- if table.primary_keys | length > 1 %}
-    {%- for column in table.primary_keys %} 
+{%- if table.primary_key_columns | length > 1 %}
+    {%- for column in table.primary_key_columns %} 
             {{column.name}},
     {%- endfor %}
 {%- else %}
-    {%- for column in table.primary_keys %} 
+    {%- for column in table.primary_key_columns %} 
             {{column.name}}: {{column.data_type | to_rust_initialize(is_nullable=column.is_nullable) }},
     {%- endfor %}
 {%- endif %}

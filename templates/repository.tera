@@ -1,8 +1,10 @@
-use crate::repository::models::{{table.name}}_gen::{{ table.name | as_upper_camel_case }};
-use async_trait::async_trait;
-use platform_core::repository::{
-    repository_base::RepositoryBase, repository_error::RepositoryResult,
+use crate::{
+    models::{{table.name}}_gen::{ {{- table.name | as_upper_camel_case }}, {{ table.name | as_upper_camel_case }}Filter},
+    repository_base::RepositoryBase,
+    repository_error::RepositoryResult,
 };
+use async_trait::async_trait;
+#[allow(unused)]
 use uuid::Uuid;
 
 #[rustfmt::skip]
@@ -11,23 +13,26 @@ pub trait {{ table.name | as_upper_camel_case }}Repository {
     async fn {{ table.name }}_insert(&self, {{ table.name }}: &{{ table.name | as_upper_camel_case }}) -> RepositoryResult;
     async fn {{ table.name }}_delete(
         &self, 
-{%- for column in table.primary_keys %}
+{%- for column in table.primary_key_columns %}
         {{column.name}}: {{column.data_type | to_rust_type(is_nullable=column.is_nullable) }},
 {%- endfor %}
     ) -> RepositoryResult<bool>;
     async fn {{ table.name }}_select(
         &self, 
-{%- for column in table.primary_keys %}
+{%- for column in table.primary_key_columns %}
         {{column.name}}: {{column.data_type | to_rust_type(is_nullable=column.is_nullable) }},
 {%- endfor %}
     ) -> RepositoryResult<Option<{{ table.name | as_upper_camel_case }}>>;
-    
-{%- for column in table.foreign_keys %}
+{%- for column in table.foreign_key_columns %}
     async fn {{ table.name }}_list_by_{{ column.name }}(
         &self,
         {{column.name}}: {{column.data_type | to_rust_type(is_nullable=column.is_nullable) }},
     ) -> RepositoryResult<Vec<{{ table.name | as_upper_camel_case }}>>;
 {%- endfor %}
+    async fn {{ table.name }}_list(
+        &self,
+        filter: {{ table.name | as_upper_camel_case }}Filter,
+    ) -> RepositoryResult<Vec<{{ table.name | as_upper_camel_case }}>>;
 }
 
 #[rustfmt::skip]
@@ -50,7 +55,7 @@ impl {{ table.name | as_upper_camel_case }}Repository for RepositoryBase {
 
     async fn {{ table.name }}_delete(
         &self, 
-{%- for column in table.primary_keys %}
+{%- for column in table.primary_key_columns %}
         {{column.name}}: {{column.data_type | to_rust_type(is_nullable=column.is_nullable) }},
 {%- endfor %}
     ) -> RepositoryResult<bool> {
@@ -58,7 +63,7 @@ impl {{ table.name | as_upper_camel_case }}Repository for RepositoryBase {
             r"
             {{ table.delete_sql }}
             ",
-{%- for column in table.primary_keys %}
+{%- for column in table.primary_key_columns %}
             {{column.name}},
 {%- endfor %}
         )
@@ -71,7 +76,7 @@ impl {{ table.name | as_upper_camel_case }}Repository for RepositoryBase {
 
     async fn {{ table.name }}_select(
         &self, 
-{%- for column in table.primary_keys %}
+{%- for column in table.primary_key_columns %}
         {{column.name}}: {{column.data_type | to_rust_type(is_nullable=column.is_nullable) }},
 {%- endfor %}
     ) -> RepositoryResult<Option<{{ table.name | as_upper_camel_case }}>> {
@@ -79,8 +84,8 @@ impl {{ table.name | as_upper_camel_case }}Repository for RepositoryBase {
             {{ table.name | as_upper_camel_case }},
             r#"
             {{ table.select_sql }}
-            WHERE {%for column in table.primary_keys %}{{ column.name}} = ?{%- endfor %}"#,
-{%- for column in table.primary_keys %}
+            WHERE {{ table.where_pk }}"#,
+{%- for column in table.primary_key_columns %}
             {{column.name}},
 {%- endfor %}
         )
@@ -90,12 +95,34 @@ impl {{ table.name | as_upper_camel_case }}Repository for RepositoryBase {
         Ok(row)
     }
 
-    {%- for column in table.foreign_keys %}
+{%- for column in table.foreign_key_columns %}
     async fn {{ table.name }}_list_by_{{ column.name }}(
         &self,
         {{column.name}}: {{column.data_type | to_rust_type(is_nullable=column.is_nullable) }},
     ) -> RepositoryResult<Vec<{{ table.name | as_upper_camel_case }}>> {
-        todo!();
+        let result = sqlx::query_as!(
+            {{ table.name | as_upper_camel_case }},
+            r#"
+            {{ table.select_sql }}
+            WHERE {{ column.name }} = ?"#,
+            {{column.name}},
+        )
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(result)
     }
 {%- endfor %}
+
+    async fn {{ table.name }}_list(
+        &self,
+        filter: {{ table.name | as_upper_camel_case }}Filter,
+    ) -> RepositoryResult<Vec<{{ table.name | as_upper_camel_case }}>> {
+        let sql_builder = filter
+            .apply_sql_builder({{ table.name | as_upper_camel_case }}::sql_builder())
+            .sql()?;
+        let result = sqlx::query_as(&sql_builder).fetch_all(&self.pool).await?;
+
+        Ok(result)
+    }
 }
