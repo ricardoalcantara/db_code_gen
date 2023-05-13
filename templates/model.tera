@@ -1,0 +1,88 @@
+use sql_builder::{SqlBuilder, SqlName};
+
+#[rustfmt::skip]
+#[derive(sqlx::FromRow)]
+pub struct {{ table.name | as_upper_camel_case}} {
+{%- for column in table.columns %}
+    pub {{column.name}}: {{column.data_type | to_rust_type(is_nullable=column.is_nullable) }},
+{%- endfor %}
+}
+
+#[rustfmt::skip]
+impl {{ table.name | as_upper_camel_case }} {
+    pub fn new(
+{%- if table.primary_keys | length > 1 %}
+    {%- for column in table.primary_keys %}
+        {{column.name}}: {{column.data_type | to_rust_type(is_nullable=column.is_nullable) }},
+    {%- endfor %}
+{%- endif %}
+{%- for column in table.ordinary_columns %}
+    {%- if column.name != "created_at" %}
+        {{column.name}}: {{column.data_type | to_rust_type(is_nullable=column.is_nullable) }},
+    {%- endif %}
+{%- endfor %}
+    ) -> {{ table.name | as_upper_camel_case }} {
+        {{ table.name | as_upper_camel_case }} {
+{%- if table.primary_keys | length > 1 %}
+    {%- for column in table.primary_keys %} 
+            {{column.name}},
+    {%- endfor %}
+{%- else %}
+    {%- for column in table.primary_keys %} 
+            {{column.name}}: {{column.data_type | to_rust_initialize(is_nullable=column.is_nullable) }},
+    {%- endfor %}
+{%- endif %}
+{%- for column in table.ordinary_columns %} 
+    {%- if column.name == "created_at" %}
+            {{column.name}}: {{column.data_type | to_rust_initialize(is_nullable=column.is_nullable) }},
+    {%- else %}
+            {{column.name}},
+    {%- endif %}
+{%- endfor %}
+        }
+    }
+
+    pub fn sql_builder() -> SqlBuilder {
+        let mut sql_builder = SqlBuilder::select_from(name!("{{ table.name }}"));
+        sql_builder.fields(&[
+{%- for column in table.columns %}
+            "{{column.name}}",
+{%- endfor %}
+        ]);
+
+        sql_builder
+    }
+}
+
+#[rustfmt::skip]
+#[derive(Debug, Default)]
+pub struct {{ table.name | as_upper_camel_case}}Filter {
+{%- for column in table.columns %}
+    pub {{column.name}}: {{column.data_type | to_rust_type(is_nullable=true) }},
+{%- endfor %}  
+    pub page: Option<u64>,
+    pub limit: Option<u64>,
+}
+
+const DEFAULT_LIMIT: u64 = 10;
+
+#[rustfmt::skip]
+impl {{ table.name | as_upper_camel_case}}Filter {
+    pub fn apply_sql_builder(&self, sql_builder: SqlBuilder) -> SqlBuilder {
+        let mut sql_builder = sql_builder;      
+
+{%- for column in table.columns %}
+        
+        if let Some({{column.name}}) = &self.{{column.name}} {
+            sql_builder.and_where_eq("{{column.name}}", {{column.name}});
+        }
+{%- endfor %}  
+
+        let limit = self.limit.unwrap_or(DEFAULT_LIMIT);
+        sql_builder.limit(limit);
+        let offset = (self.page.unwrap_or(1) - 1) * limit;
+        sql_builder.offset(offset);
+
+        sql_builder
+    }
+}
