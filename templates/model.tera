@@ -1,4 +1,4 @@
-use sql_builder::{SqlBuilder, SqlName};
+use sqlx::{MySql, QueryBuilder};
 
 #[rustfmt::skip]
 #[derive(sqlx::FromRow)]
@@ -41,17 +41,6 @@ impl {{ table.name | as_upper_camel_case }} {
 {%- endfor %}
         }
     }
-
-    pub fn sql_builder() -> SqlBuilder {
-        let mut sql_builder = SqlBuilder::select_from(name!("{{ table.name }}"));
-        sql_builder.fields(&[
-{%- for column in table.columns %}
-            "{{column.name}}",
-{%- endfor %}
-        ]);
-
-        sql_builder
-    }
 }
 
 #[rustfmt::skip]
@@ -68,21 +57,52 @@ const DEFAULT_LIMIT: u64 = 10;
 
 #[rustfmt::skip]
 impl {{ table.name | as_upper_camel_case}}Filter {
-    pub fn apply_sql_builder(&self, sql_builder: SqlBuilder) -> SqlBuilder {
-        let mut sql_builder = sql_builder;      
 
+{%- for column in table.columns %}
+    pub fn {{column.name}}(mut self, {{column.name}}: {{column.data_type | to_rust_type(is_nullable=false) }}) -> Self {
+        self.{{column.name}} = Some({{column.name}});
+        self
+    }
+{%- endfor %}  
+    pub fn page(mut self, page: u64) -> Self {
+        self.page = Some(page);
+        self
+    }
+    pub fn limit(mut self, limit: u64) -> Self {
+        self.limit = Some(limit);
+        self
+    }
+
+{%- for column in table.columns %}
+    pub fn set_{{column.name}}(&mut self, {{column.name}}: {{column.data_type | to_rust_type(is_nullable=true) }}) {
+        self.{{column.name}} = {{column.name}};
+    }
+{%- endfor %}  
+    pub fn set_page(mut self, page: Option<u64>) {
+        self.page = page;
+    }
+    pub fn set_limit(mut self, limit: Option<u64>) {
+        self.limit = limit;
+    }
+
+    pub(crate) fn apply_query_builder(&self) -> QueryBuilder::<MySql>{
+        let mut qb = QueryBuilder::<MySql>::new(r#"SELECT {{ table.columns | map(attribute="name") | join(sep=", ")}} FROM {{ table.name }}"#);
+        
 {%- for column in table.columns %}
         
         if let Some({{column.name}}) = &self.{{column.name}} {
-            sql_builder.and_where_eq("{{column.name}}", {{column.name}});
+            if !qb.sql().ends_with("WHERE ") {
+                qb.push(" WHERE ");
+            }
+            qb.push("{{column.name}} = ").push_bind({{column.name}});
         }
 {%- endfor %}  
-
+        
         let limit = self.limit.unwrap_or(DEFAULT_LIMIT);
-        sql_builder.limit(limit);
         let offset = (self.page.unwrap_or(1) - 1) * limit;
-        sql_builder.offset(offset);
 
-        sql_builder
+        qb.push(" LIMIT ").push(limit).push(" OFFSET ").push(offset);
+
+        qb
     }
 }

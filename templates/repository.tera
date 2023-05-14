@@ -118,10 +118,11 @@ impl {{ table.name | as_upper_camel_case }}Repository for RepositoryBase {
         &self,
         filter: {{ table.name | as_upper_camel_case }}Filter,
     ) -> RepositoryResult<Vec<{{ table.name | as_upper_camel_case }}>> {
-        let sql_builder = filter
-            .apply_sql_builder({{ table.name | as_upper_camel_case }}::sql_builder())
-            .sql()?;
-        let result = sqlx::query_as(&sql_builder).fetch_all(&self.pool).await?;
+        let result = filter
+            .apply_query_builder()
+            .build_query_as::<{{ table.name | as_upper_camel_case }}>()
+            .fetch_all(&self.pool)
+            .await?;
 
         Ok(result)
     }
