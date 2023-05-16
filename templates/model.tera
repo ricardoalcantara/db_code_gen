@@ -151,9 +151,9 @@ impl {{ table.name | as_upper_camel_case}}Update {
         let mut qb = self.qb;
 {%- for column in table.primary_key_columns %}
     {% if loop.index0 == 0 %}
-        qb.push(" WHERE ").push_bind(self.{{column.name}});
+        qb.push(" WHERE ").push("{{column.name}} = ").push_bind(self.{{column.name}});
     {% else %}
-        qb.push(" AND ").push_bind(self.{{column.name}});
+        qb.push(" AND ").push("{{column.name}} = ").push_bind(self.{{column.name}});
     {% endif %}
 {%- endfor %}
         qb

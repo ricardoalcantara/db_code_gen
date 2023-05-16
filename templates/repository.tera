@@ -1,7 +1,7 @@
 use crate::{
     models::{{table.name}}_gen::{ {{- table.name | as_upper_camel_case }}, {{ table.name | as_upper_camel_case }}Filter, {{ table.name | as_upper_camel_case }}Update},
     repository_base::RepositoryBase,
-    repository_error::RepositoryResult,
+    repository_error::RepositoryResult, repository_transaction::RepositoryTransaction,
 };
 use async_trait::async_trait;
 use sqlx::{MySql, QueryBuilder};
@@ -156,6 +156,127 @@ impl {{ table.name | as_upper_camel_case }}Repository for RepositoryBase {
             .apply_query_builder()
             .build_query_as::<{{ table.name | as_upper_camel_case }}>()
             .fetch_all(&self.pool)
+            .await?;
+
+        Ok(result)
+    }
+}
+
+#[rustfmt::skip]
+#[async_trait]
+impl {{ table.name | as_upper_camel_case }}Repository for RepositoryTransaction {
+    async fn {{ table.name }}_insert(&self, {{ table.name }}: &{{ table.name | as_upper_camel_case }}) -> RepositoryResult {
+        sqlx::query!(
+            r#"
+            {{ table.insert_sql }}
+            "#,
+{%- for column in table.columns %}
+            {{ table.name }}.{{column.name}},
+{%- endfor %}
+        )
+        .execute(&mut *self.transaction.lock().await)
+        .await?;
+
+        Ok(())
+    }
+
+    async fn {{ table.name }}_insert_array(&self, {{ table.name }}_array: &[{{ table.name | as_upper_camel_case }}]) -> RepositoryResult {
+        let mut qb = QueryBuilder::<MySql>::new(r#"INSERT INTO `{{ table.name }}` ({{ table.columns | map(attribute="name") | join(sep=", ")}})"#);
+        qb.push_values({{ table.name }}_array, |mut b, {{ table.name }}| {
+{%- for column in table.columns %}
+            b.push_bind(&{{ table.name }}.{{column.name}});
+{%- endfor %}
+        });
+
+        qb.build()
+            .execute(&mut *self.transaction.lock().await)
+            .await?;
+
+        Ok(())
+    }
+
+    async fn {{ table.name }}_delete(
+        &self, 
+{%- for column in table.primary_key_columns %}
+        {{column.name}}: {{column.data_type | to_rust_type(is_nullable=column.is_nullable) }},
+{%- endfor %}
+    ) -> RepositoryResult<bool> {
+        let rows_affected = sqlx::query!(
+            r"
+            {{ table.delete_sql }}
+            ",
+{%- for column in table.primary_key_columns %}
+            {{column.name}},
+{%- endfor %}
+        )
+        .execute(&mut *self.transaction.lock().await)
+        .await?
+        .rows_affected();
+
+        Ok(rows_affected > 0)
+    }
+
+    async fn {{ table.name }}_select(
+        &self, 
+{%- for column in table.primary_key_columns %}
+        {{column.name}}: {{column.data_type | to_rust_type(is_nullable=column.is_nullable) }},
+{%- endfor %}
+    ) -> RepositoryResult<Option<{{ table.name | as_upper_camel_case }}>> {
+        let row = sqlx::query_as!(
+            {{ table.name | as_upper_camel_case }},
+            r#"
+            {{ table.select_sql }}
+            WHERE {{ table.where_pk }}"#,
+{%- for column in table.primary_key_columns %}
+            {{column.name}},
+{%- endfor %}
+        )
+        .fetch_optional(&mut *self.transaction.lock().await)
+        .await?;
+
+        Ok(row)
+    }
+
+    async fn {{ table.name }}_update(
+        &self,
+        {{ table.name }}_update: {{ table.name | as_upper_camel_case }}Update,
+    ) -> RepositoryResult {
+        {{ table.name }}_update
+            .apply_query_builder()
+            .build()
+            .execute(&mut *self.transaction.lock().await)
+            .await?;
+
+        Ok(())
+    }
+
+{%- for column in table.foreign_key_columns %}
+    async fn {{ table.name }}_list_by_{{ column.name }}(
+        &self,
+        {{column.name}}: {{column.data_type | to_rust_type(is_nullable=column.is_nullable) }},
+    ) -> RepositoryResult<Vec<{{ table.name | as_upper_camel_case }}>> {
+        let result = sqlx::query_as!(
+            {{ table.name | as_upper_camel_case }},
+            r#"
+            {{ table.select_sql }}
+            WHERE {{ column.name }} = ?"#,
+            {{column.name}},
+        )
+        .fetch_all(&mut *self.transaction.lock().await)
+        .await?;
+
+        Ok(result)
+    }
+{%- endfor %}
+
+    async fn {{ table.name }}_list(
+        &self,
+        filter: {{ table.name | as_upper_camel_case }}Filter,
+    ) -> RepositoryResult<Vec<{{ table.name | as_upper_camel_case }}>> {
+        let result = filter
+            .apply_query_builder()
+            .build_query_as::<{{ table.name | as_upper_camel_case }}>()
+            .fetch_all(&mut *self.transaction.lock().await)
             .await?;
 
         Ok(result)
