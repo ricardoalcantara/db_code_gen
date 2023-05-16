@@ -1,9 +1,10 @@
 use crate::{
-    models::{{table.name}}_gen::{ {{- table.name | as_upper_camel_case }}, {{ table.name | as_upper_camel_case }}Filter},
+    models::{{table.name}}_gen::{ {{- table.name | as_upper_camel_case }}, {{ table.name | as_upper_camel_case }}Filter, {{ table.name | as_upper_camel_case }}Update},
     repository_base::RepositoryBase,
     repository_error::RepositoryResult,
 };
 use async_trait::async_trait;
+use sqlx::{MySql, QueryBuilder};
 #[allow(unused)]
 use uuid::Uuid;
 
@@ -11,6 +12,7 @@ use uuid::Uuid;
 #[async_trait]
 pub trait {{ table.name | as_upper_camel_case }}Repository {
     async fn {{ table.name }}_insert(&self, {{ table.name }}: &{{ table.name | as_upper_camel_case }}) -> RepositoryResult;
+    async fn {{ table.name }}_insert_array(&self, {{ table.name }}_array: &[{{ table.name | as_upper_camel_case }}]) -> RepositoryResult;
     async fn {{ table.name }}_delete(
         &self, 
 {%- for column in table.primary_key_columns %}
@@ -23,6 +25,10 @@ pub trait {{ table.name | as_upper_camel_case }}Repository {
         {{column.name}}: {{column.data_type | to_rust_type(is_nullable=column.is_nullable) }},
 {%- endfor %}
     ) -> RepositoryResult<Option<{{ table.name | as_upper_camel_case }}>>;
+    async fn {{ table.name }}_update(
+        &self,
+        {{ table.name }}_update: {{ table.name | as_upper_camel_case }}Update,
+    ) -> RepositoryResult;
 {%- for column in table.foreign_key_columns %}
     async fn {{ table.name }}_list_by_{{ column.name }}(
         &self,
@@ -49,6 +55,21 @@ impl {{ table.name | as_upper_camel_case }}Repository for RepositoryBase {
         )
         .execute(&self.pool)
         .await?;
+
+        Ok(())
+    }
+
+    async fn {{ table.name }}_insert_array(&self, {{ table.name }}_array: &[{{ table.name | as_upper_camel_case }}]) -> RepositoryResult {
+        let mut qb = QueryBuilder::<MySql>::new(r#"INSERT INTO `{{ table.name }}` ({{ table.columns | map(attribute="name") | join(sep=", ")}})"#);
+        qb.push_values({{ table.name }}_array, |mut b, {{ table.name }}| {
+{%- for column in table.columns %}
+            b.push_bind(&{{ table.name }}.{{column.name}});
+{%- endfor %}
+        });
+
+        qb.build()
+            .execute(&self.pool)
+            .await?;
 
         Ok(())
     }
@@ -93,6 +114,19 @@ impl {{ table.name | as_upper_camel_case }}Repository for RepositoryBase {
         .await?;
 
         Ok(row)
+    }
+
+    async fn {{ table.name }}_update(
+        &self,
+        {{ table.name }}_update: {{ table.name | as_upper_camel_case }}Update,
+    ) -> RepositoryResult {
+        {{ table.name }}_update
+            .apply_query_builder()
+            .build()
+            .execute(&self.pool)
+            .await?;
+
+        Ok(())
     }
 
 {%- for column in table.foreign_key_columns %}

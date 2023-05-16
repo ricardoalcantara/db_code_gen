@@ -44,23 +44,44 @@ impl {{ table.name | as_upper_camel_case }} {
 }
 
 #[rustfmt::skip]
-#[derive(Debug, Default)]
 pub struct {{ table.name | as_upper_camel_case}}Filter {
-{%- for column in table.columns %}
-    pub {{column.name}}: {{column.data_type | to_rust_type(is_nullable=true) }},
-{%- endfor %}  
-    pub page: Option<u64>,
-    pub limit: Option<u64>,
+    page: Option<u64>,
+    limit: Option<u64>,
+    qb: QueryBuilder::<'static, MySql>,
 }
 
 const DEFAULT_LIMIT: u64 = 10;
 
 #[rustfmt::skip]
-impl {{ table.name | as_upper_camel_case}}Filter {
+impl Default for {{ table.name | as_upper_camel_case}}Filter {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
+#[rustfmt::skip]
+impl {{ table.name | as_upper_camel_case}}Filter {
+    pub fn new() -> Self {
+        let mut qb = QueryBuilder::<MySql>::new(r#"SELECT {{ table.columns | map(attribute="name") | join(sep=", ")}} FROM `{{ table.name }}`"#);
+        qb.push(" WHERE ");
+        Self {
+            page: None,
+            limit: None,
+            qb,
+        }
+    }
+
+    pub fn and(mut self) -> Self {
+        self.qb.push(" AND ");
+        self
+    }
+    pub fn or(mut self) -> Self {
+        self.qb.push(" OR ");
+        self
+    }
 {%- for column in table.columns %}
     pub fn {{column.name}}(mut self, {{column.name}}: {{column.data_type | to_rust_type(is_nullable=false) }}) -> Self {
-        self.{{column.name}} = Some({{column.name}});
+        self.qb.push("{{column.name}} = ").push_bind({{column.name}});
         self
     }
 {%- endfor %}  
@@ -73,11 +94,6 @@ impl {{ table.name | as_upper_camel_case}}Filter {
         self
     }
 
-{%- for column in table.columns %}
-    pub fn set_{{column.name}}(&mut self, {{column.name}}: {{column.data_type | to_rust_type(is_nullable=true) }}) {
-        self.{{column.name}} = {{column.name}};
-    }
-{%- endfor %}  
     pub fn set_page(mut self, page: Option<u64>) {
         self.page = page;
     }
@@ -85,24 +101,61 @@ impl {{ table.name | as_upper_camel_case}}Filter {
         self.limit = limit;
     }
 
-    pub(crate) fn apply_query_builder(&self) -> QueryBuilder::<MySql>{
-        let mut qb = QueryBuilder::<MySql>::new(r#"SELECT {{ table.columns | map(attribute="name") | join(sep=", ")}} FROM {{ table.name }}"#);
-        
-{%- for column in table.columns %}
-        
-        if let Some({{column.name}}) = &self.{{column.name}} {
-            if !qb.sql().ends_with("WHERE ") {
-                qb.push(" WHERE ");
-            }
-            qb.push("{{column.name}} = ").push_bind({{column.name}});
+    pub(crate) fn apply_query_builder(self) -> QueryBuilder::<'static, MySql>{
+        let mut qb = self.qb;
+        if qb.sql().ends_with("WHERE ") {
+            qb.reset();
         }
-{%- endfor %}  
-        
+
         let limit = self.limit.unwrap_or(DEFAULT_LIMIT);
         let offset = (self.page.unwrap_or(1) - 1) * limit;
 
         qb.push(" LIMIT ").push(limit).push(" OFFSET ").push(offset);
 
+        qb
+    }
+}
+
+#[rustfmt::skip]
+pub struct {{ table.name | as_upper_camel_case}}Update {
+{%- for column in table.primary_key_columns %}
+    {{column.name}}: {{column.data_type | to_rust_type(is_nullable=column.is_nullable) }},
+{%- endfor %}
+    qb: QueryBuilder<'static, MySql>,
+}
+
+#[rustfmt::skip]
+impl {{ table.name | as_upper_camel_case}}Update {
+    pub fn new(
+{%- for column in table.primary_key_columns %}
+        {{column.name}}: {{column.data_type | to_rust_type(is_nullable=column.is_nullable) }},
+{%- endfor %}
+    ) -> Self {
+        let qb = QueryBuilder::<MySql>::new(r#"UPDATE `{{ table.name }}` SET "#);
+        Self {
+{%- for column in table.primary_key_columns %}
+            {{column.name}},
+{%- endfor %}
+            qb,
+        }
+    }
+
+{%- for column in table.ordinary_columns %}
+    pub fn {{column.name}}(mut self, {{column.name}}: {{column.data_type | to_rust_type(is_nullable=column.is_nullable) }}) -> Self {
+        self.qb.push("{{column.name}} = ").push_bind({{column.name}});
+        self
+    }
+{%- endfor %} 
+
+    pub(crate) fn apply_query_builder(self) -> QueryBuilder<'static, MySql> {
+        let mut qb = self.qb;
+{%- for column in table.primary_key_columns %}
+    {% if loop.index0 == 0 %}
+        qb.push(" WHERE ").push_bind(self.{{column.name}});
+    {% else %}
+        qb.push(" AND ").push_bind(self.{{column.name}});
+    {% endif %}
+{%- endfor %}
         qb
     }
 }
