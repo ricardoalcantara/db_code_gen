@@ -35,6 +35,14 @@ pub trait {{ table.name | as_upper_camel_case }}Repository {
         {{column.name}}: {{column.data_type | to_rust_type(is_nullable=column.is_nullable) }},
     ) -> RepositoryResult<Vec<{{ table.name | as_upper_camel_case }}>>;
 {%- endfor %}
+{%- if table.unique_columns | length == 1 %}
+{%- for column in table.unique_columns %}
+    async fn {{ table.name }}_list_by_{{ column.name }}(
+        &self,
+        {{column.name}}: {{column.data_type | to_rust_type(is_nullable=column.is_nullable) }},
+    ) -> RepositoryResult<Vec<{{ table.name | as_upper_camel_case }}>>;
+{%- endfor %}
+{%- endif %}
     async fn {{ table.name }}_list(
         &self,
         filter: {{ table.name | as_upper_camel_case }}Filter,
@@ -49,9 +57,10 @@ impl {{ table.name | as_upper_camel_case }}Repository for {% if loop.index0 == 0
     async fn {{ table.name }}_insert(&self, {{ table.name }}: &{{ table.name | as_upper_camel_case }}) -> RepositoryResult {
         sqlx::query!(
             r#"
-            {{ table.insert_sql }}
+            {{ table.insert_sql }} VALUES {{ table.insert_sql_values }}
             "#,
 {%- for column in table.columns %}
+            {%- if column.primary_key and column.is_auto_increment == true %}{% continue %}{% endif %}
             {{ table.name }}.{{column.name}},
 {%- endfor %}
         )
@@ -62,9 +71,10 @@ impl {{ table.name | as_upper_camel_case }}Repository for {% if loop.index0 == 0
     }
 
     async fn {{ table.name }}_insert_array(&self, {{ table.name }}_array: &[{{ table.name | as_upper_camel_case }}]) -> RepositoryResult {
-        let mut qb = QueryBuilder::<MySql>::new(r#"INSERT INTO `{{ table.name }}` ({{ table.columns | map(attribute="name") | join(sep=", ")}})"#);
+        let mut qb = QueryBuilder::<MySql>::new(r#"{{ table.insert_sql }}"#);
         qb.push_values({{ table.name }}_array, |mut b, {{ table.name }}| {
 {%- for column in table.columns %}
+            {%- if column.primary_key and column.is_auto_increment == true %}{% continue %}{% endif %}
             b.push_bind(&{{ table.name }}.{{column.name}});
 {%- endfor %}
         });
@@ -149,7 +159,26 @@ impl {{ table.name | as_upper_camel_case }}Repository for {% if loop.index0 == 0
         Ok(result)
     }
 {%- endfor %}
+{%- if table.unique_columns | length == 1 %}
+{%- for column in table.unique_columns %}
+    async fn {{ table.name }}_list_by_{{ column.name }}(
+        &self,
+        {{column.name}}: {{column.data_type | to_rust_type(is_nullable=column.is_nullable) }},
+    ) -> RepositoryResult<Vec<{{ table.name | as_upper_camel_case }}>> {
+        let result = sqlx::query_as!(
+            {{ table.name | as_upper_camel_case }},
+            r#"
+            {{ table.select_sql }}
+            WHERE {{ column.name }} = ?"#,
+            {{column.name}},
+        )
+        .fetch_all({{executor}})
+        .await?;
 
+        Ok(result)
+    }
+{%- endfor %}
+{%- endif %}
     async fn {{ table.name }}_list(
         &self,
         filter: {{ table.name | as_upper_camel_case }}Filter,

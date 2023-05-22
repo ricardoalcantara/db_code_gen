@@ -1,55 +1,85 @@
 use anyhow::Result;
-use sqlx::{ConnectOptions, MySqlConnection};
+use sqlx::{ConnectOptions, FromRow, MySqlConnection};
 use std::str::FromStr;
 
-use crate::table::{Column, Table};
+use crate::table::{Column, Key, Table};
 
-struct Key {
-    column_name: String,
-    constraint_name: String,
-    constraint_type: String,
-}
-
-pub async fn load_database(database_url: String, table_schema: &str) -> Result<Vec<Table>> {
-    let options = sqlx::mysql::MySqlConnectOptions::from_str(&database_url)?;
+pub async fn load_database(database_url: &str, table_schema: &str) -> Result<Vec<Table>> {
+    let options = sqlx::mysql::MySqlConnectOptions::from_str(database_url)?;
 
     let mut conn = options.connect().await?;
 
     let mut tables = Vec::new();
 
-    for table_name in load_table_names(&mut conn, table_schema).await? {
-        let keys = get_keys(&mut conn, table_schema, &table_name).await?;
-        let mut columns = load_table_columns(&mut conn, table_schema, &table_name).await?;
+    for table in load_table_names(&mut conn, table_schema).await? {
+        let keys = get_keys(&mut conn, table_schema, &table.TABLE_NAME).await?;
+        let mut columns = load_table_columns(&mut conn, table_schema, &table.TABLE_NAME).await?;
 
         for key in keys {
             if let Some(mut column) = columns.iter_mut().find(|c| c.name == key.column_name) {
                 if key.constraint_type == "PRIMARY KEY" {
-                    column.is_primary_key = true;
+                    column.primary_key = Some(key.constraint_name);
                 } else if key.constraint_type == "FOREIGN KEY" {
-                    column.is_foreign_key = true;
+                    column.foreign_key = Some(key.constraint_name);
+                } else if key.constraint_type == "UNIQUE" {
+                    column.unique = Some(key.constraint_name);
                 }
             }
         }
 
-        let table = Table::new(table_name, columns)?;
-
-        tables.push(table);
+        let model_table = Table::new(
+            table.TABLE_NAME,
+            table.AUTO_INCREMENT.unwrap_or_default(),
+            columns,
+        )?;
+        tables.push(model_table);
     }
 
     Ok(tables)
 }
 
-async fn load_table_names(conn: &mut MySqlConnection, table_schema: &str) -> Result<Vec<String>> {
-    let result = sqlx::query!(
-        r"SELECT TABLE_NAME
+#[derive(FromRow)]
+struct Tables {
+    TABLE_NAME: String,
+    AUTO_INCREMENT: Option<bool>,
+}
+
+#[derive(FromRow)]
+struct Columns {
+    COLUMN_NAME: String,
+    COLUMN_TYPE: String,
+    IS_NULLABLE: String,
+    EXTRA: String,
+    // ordinal_position: String,
+    // column_comment: String,
+}
+
+#[derive(FromRow)]
+struct TableConstraints {
+    CONSTRAINT_SCHEMA: String,
+    CONSTRAINT_NAME: String,
+    CONSTRAINT_TYPE: String,
+}
+
+#[derive(FromRow)]
+struct KeyColumnUsage {
+    COLUMN_NAME: String,
+    CONSTRAINT_SCHEMA: String,
+    CONSTRAINT_NAME: String,
+    ORDINAL_POSITION: u32,
+}
+
+async fn load_table_names(conn: &mut MySqlConnection, table_schema: &str) -> Result<Vec<Tables>> {
+    let result: Vec<Tables> = sqlx::query_as(
+        r"SELECT TABLE_NAME, AUTO_INCREMENT
         FROM INFORMATION_SCHEMA.tables
         WHERE TABLE_SCHEMA = ?",
-        table_schema
     )
+    .bind(table_schema)
     .fetch_all(conn)
     .await?;
 
-    Ok(result.into_iter().map(|r| r.TABLE_NAME).collect())
+    Ok(result)
 }
 
 async fn load_table_columns(
@@ -57,27 +87,27 @@ async fn load_table_columns(
     table_schema: &str,
     table_name: &str,
 ) -> Result<Vec<Column>> {
-    let result = sqlx::query!(
-        r"SELECT COLUMN_NAME, IS_NULLABLE, ORDINAL_POSITION, COLUMN_TYPE, COLUMN_COMMENT
+    let result: Vec<Columns> = sqlx::query_as(
+        r"SELECT COLUMN_NAME, COLUMN_TYPE, IS_NULLABLE, ORDINAL_POSITION, EXTRA, COLUMN_COMMENT
         FROM INFORMATION_SCHEMA.columns
         WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ?
-        ORDER BY ORDINAL_POSITION ",
-        table_schema,
-        table_name
+        ORDER BY ORDINAL_POSITION",
     )
+    .bind(table_schema)
+    .bind(table_name)
     .fetch_all(conn)
     .await?;
 
     Ok(result
         .into_iter()
         .map(|r| Column {
-            name: r
-                .COLUMN_NAME
-                .expect("I don't know what to do with COLUMN_NAME null"),
+            name: r.COLUMN_NAME,
             data_type: r.COLUMN_TYPE,
+            is_auto_increment: r.EXTRA == "auto_increment",
             is_nullable: r.IS_NULLABLE == "YES",
-            is_primary_key: false,
-            is_foreign_key: false,
+            primary_key: None,
+            foreign_key: None,
+            unique: None,
         })
         .collect())
 }
@@ -87,23 +117,23 @@ async fn get_keys(
     table_schema: &str,
     table_name: &str,
 ) -> Result<Vec<Key>> {
-    let table_constraints = sqlx::query!(
+    let table_constraints: Vec<TableConstraints> = sqlx::query_as(
         r"SELECT CONSTRAINT_SCHEMA, CONSTRAINT_NAME, CONSTRAINT_TYPE
         FROM INFORMATION_SCHEMA.table_constraints
         WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? ",
-        table_schema,
-        table_name
     )
+    .bind(table_schema)
+    .bind(table_name)
     .fetch_all(&mut *conn)
     .await?;
 
-    let key_column_usage = sqlx::query!(
+    let key_column_usage: Vec<KeyColumnUsage> = sqlx::query_as(
         r"SELECT COLUMN_NAME, CONSTRAINT_SCHEMA, CONSTRAINT_NAME, ORDINAL_POSITION
         FROM INFORMATION_SCHEMA.key_column_usage
         WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? ",
-        table_schema,
-        table_name
     )
+    .bind(table_schema)
+    .bind(table_name)
     .fetch_all(&mut *conn)
     .await?;
 
@@ -118,8 +148,8 @@ async fn get_keys(
                 .clone();
 
             Key {
-                column_name: c.COLUMN_NAME.unwrap(),
-                constraint_name: c.CONSTRAINT_NAME.unwrap(),
+                column_name: c.COLUMN_NAME,
+                constraint_name: c.CONSTRAINT_NAME,
                 constraint_type,
             }
         })

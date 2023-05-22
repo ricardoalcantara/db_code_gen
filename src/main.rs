@@ -1,17 +1,16 @@
-use dotenvy::dotenv;
+use clap::Parser;
 use filters::register_filter;
 use information_schema::load_database;
 use table::Table;
 use tera::{Context, Tera};
 
+pub mod cli;
 pub mod filters;
 pub mod information_schema;
 pub mod table;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    dotenv().ok();
-
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::builder()
@@ -20,13 +19,34 @@ async fn main() -> anyhow::Result<()> {
         )
         .init();
 
-    let database_url = std::env::var("DATABASE_URL").expect("DATABASE_URL must be set");
+    let args = cli::Cli::parse();
+    let config = match args.command {
+        cli::Commands::File { path } => {
+            let data = std::fs::read_to_string(&path)?;
 
-    let table_schema = "platform_application";
+            if path.ends_with(".json") {
+                serde_json::from_str(&data).unwrap()
+            } else {
+                serde_yaml::from_str(&data).unwrap()
+            }
+        }
+        cli::Commands::Inline(config) => config,
+    };
 
-    let tables: Vec<Table> = load_database(database_url, table_schema).await?;
+    if let Some(env) = config.dotenv {
+        dotenvy::from_path(env).ok();
+    }
 
-    let tera = match Tera::new("templates/**/*") {
+    let database_url = config
+        .database_url
+        .or(std::env::var("DATABASE_URL").ok())
+        .expect("DATABASE_URL must be set");
+
+    let table_schema = database_url[(database_url.rfind("/").unwrap() + 1)..].to_owned();
+
+    let tables: Vec<Table> = load_database(&database_url, &table_schema).await?;
+
+    let tera = match Tera::new(&format!("{}/**/*", config.template_directory)) {
         Ok(mut tera) => {
             register_filter(&mut tera);
             tera
@@ -41,84 +61,26 @@ async fn main() -> anyhow::Result<()> {
         if table.name == "_sqlx_migrations" {
             continue;
         }
-        println!("Table: {}", table.name);
 
         let mut context = Context::new();
         context.insert("table", table);
 
-        let output = tera.render("model.tera", &context)?;
+        for template in &config.templates {
+            let mut split = template.split(":");
+            let template_name = split.next().unwrap();
+            let suffix = split.next().unwrap_or_default();
 
-        std::fs::write(
-            format!(
-                "E:/Projects/plataforma-rs/platform-application/lib/repository/src/models/{}_gen.rs",
-                table.name
-            ),
-            output,
-        )
-        .unwrap();
+            let rendered = tera.render(template_name, &context)?;
 
-        let output = tera.render("repository.tera", &context)?;
-
-        std::fs::write(
-            format!(
-                "E:/Projects/plataforma-rs/platform-application/lib/repository/src/repositories/{}_repository_gen.rs",
-                table.name
-            ),
-            output,
-        )
-        .unwrap();
+            let output_file = if config.render_folder {
+                let folder = template_name[..template_name.rfind(".").unwrap()].to_owned();
+                format!("{}/{folder}/{}{suffix}", config.output, table.name)
+            } else {
+                format!("{}/{}{suffix}", config.output, table.name)
+            };
+            std::fs::write(output_file, rendered).unwrap();
+        }
     }
 
     Ok(())
 }
-
-// async fn load_table_names() {
-//     information_schema.tables (table_schema, table_name) {
-//             table_schema -> VarChar,
-//             table_name -> VarChar,
-//             table_comment -> VarChar,
-//         }
-// }
-
-// async fn load_table_data(conn: &mut MysqlConnection, table: &TableName,) {
-
-//     information_schema.columns (table_schema, table_name, column_name) {
-//             table_schema -> VarChar,
-//             table_name -> VarChar,
-//             column_name -> VarChar,
-//             #[sql_name = "is_nullable"]
-//             __is_nullable -> VarChar,
-//             ordinal_position -> BigInt,
-//             udt_name -> VarChar,
-//             udt_schema -> VarChar,
-//             column_type -> VarChar,
-//             column_comment -> VarChar,
-//         }
-// }
-
-// async fn get_primary_keys(
-//     conn: &mut InferConnection,
-//     table: &TableName,
-// ) {
-//     table! {
-//         information_schema.key_column_usage (table_schema, table_name, column_name, constraint_name) {
-//             table_schema -> VarChar,
-//             table_name -> VarChar,
-//             column_name -> VarChar,
-//             constraint_schema -> VarChar,
-//             constraint_name -> VarChar,
-//             ordinal_position -> BigInt,
-//         }
-//     }
-// }
-
-// async fn load_fk() {
-//     table! {
-//         information_schema.table_constraints (constraint_schema, constraint_name) {
-//             table_schema -> VarChar,
-//             constraint_schema -> VarChar,
-//             constraint_name -> VarChar,
-//             constraint_type -> VarChar,
-//         }
-//     }
-// }
