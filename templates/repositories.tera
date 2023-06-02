@@ -71,6 +71,7 @@ impl {{ table.name | as_upper_camel_case }}Repository for {% if loop.index0 == 0
     }
 
     async fn {{ table.name }}_insert_array(&self, {{ table.name }}_array: Vec<&{{ table.name | as_upper_camel_case }}>) -> RepositoryResult {
+        if {{ table.name }}_array.len() == 0 { return Ok(()) }
         let mut qb = QueryBuilder::<MySql>::new(r#"{{ table.insert_sql }}"#);
         qb.push_values({{ table.name }}_array, |mut b, {{ table.name }}| {
 {%- for column in table.columns %}
