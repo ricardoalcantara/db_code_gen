@@ -1,7 +1,7 @@
 use sqlx::{MySql, QueryBuilder};
 
 #[rustfmt::skip]
-#[derive(sqlx::FromRow)]
+#[derive(sqlx::FromRow, Debug, Clone)]
 pub struct {{ table.name | as_upper_camel_case}} {
 {%- for column in table.columns %}
     pub {{column.name}}: {{column.data_type | to_rust_type(is_nullable=column.is_nullable) }},
