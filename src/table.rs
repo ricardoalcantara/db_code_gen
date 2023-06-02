@@ -66,9 +66,6 @@ impl Table {
             .map(|c| c.clone())
             .collect();
 
-        if name == "dns_path" {
-            println!("{}", serde_json::to_string_pretty(&unique_columns).unwrap());
-        }
         let mut insert_sql_builder = SqlBuilder::insert_into(baname!(&name));
         let mut select_sql_builder = SqlBuilder::select_from(baname!(&name));
 
@@ -76,14 +73,16 @@ impl Table {
         for field in &columns {
             if !(field.primary_key.is_some() && field.is_auto_increment) {
                 field_count += 1;
-                insert_sql_builder.field(&field.name);
+                insert_sql_builder.field(baname!(&field.name));
             }
             if field.data_type == "binary(16)" {
-                select_sql_builder.field(format!("{name} as \"{name}:Uuid\"", name = field.name));
+                select_sql_builder
+                    .field(format!("`{name}` as \"{name}:Uuid\"", name = &field.name));
             } else if field.data_type == "tinyint(1)" {
-                select_sql_builder.field(format!("{name} as \"{name}:bool\"", name = field.name));
+                select_sql_builder
+                    .field(format!("`{name}` as \"{name}:bool\"", name = &field.name));
             } else {
-                select_sql_builder.field(&field.name);
+                select_sql_builder.field(baname!(&field.name));
             }
         }
 
@@ -110,12 +109,12 @@ impl Table {
 
         let where_pk = primary_key_columns
             .iter()
-            .map(|c| format!("{} = ?", c.name))
+            .map(|c| format!("{} = ?", baname!(&c.name)))
             .collect::<Vec<String>>()
             .join(" AND ");
         let where_fk = primary_key_columns
             .iter()
-            .map(|c| format!("{} = ?", c.name))
+            .map(|c| format!("{} = ?", baname!(&c.name)))
             .collect::<Vec<String>>()
             .join(" AND ");
 

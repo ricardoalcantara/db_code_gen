@@ -114,7 +114,7 @@ fn is_datetime(value: &str) -> bool {
 }
 
 fn is_string(value: &str) -> bool {
-    value.starts_with("varchar") || value.starts_with("char")
+    value.starts_with("varchar") || value.starts_with("char") || value.starts_with("text")
 }
 
 fn is_bool(value: &str) -> bool {

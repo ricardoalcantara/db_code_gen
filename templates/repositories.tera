@@ -169,7 +169,7 @@ impl {{ table.name | as_upper_camel_case }}Repository for {% if loop.index0 == 0
             {{ table.name | as_upper_camel_case }},
             r#"
             {{ table.select_sql }}
-            WHERE {{ column.name }} = ?"#,
+            WHERE `{{ column.name }}` = ?"#,
             {{column.name}},
         )
         .fetch_all({{executor}})
