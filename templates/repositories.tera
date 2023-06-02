@@ -12,7 +12,7 @@ use uuid::Uuid;
 #[async_trait]
 pub trait {{ table.name | as_upper_camel_case }}Repository {
     async fn {{ table.name }}_insert(&self, {{ table.name }}: &{{ table.name | as_upper_camel_case }}) -> RepositoryResult;
-    async fn {{ table.name }}_insert_array(&self, {{ table.name }}_array: &[{{ table.name | as_upper_camel_case }}]) -> RepositoryResult;
+    async fn {{ table.name }}_insert_array(&self, {{ table.name }}_array: Vec<&{{ table.name | as_upper_camel_case }}>) -> RepositoryResult;
     async fn {{ table.name }}_delete(
         &self, 
 {%- for column in table.primary_key_columns %}
@@ -70,7 +70,7 @@ impl {{ table.name | as_upper_camel_case }}Repository for {% if loop.index0 == 0
         Ok(())
     }
 
-    async fn {{ table.name }}_insert_array(&self, {{ table.name }}_array: &[{{ table.name | as_upper_camel_case }}]) -> RepositoryResult {
+    async fn {{ table.name }}_insert_array(&self, {{ table.name }}_array: Vec<&{{ table.name | as_upper_camel_case }}>) -> RepositoryResult {
         let mut qb = QueryBuilder::<MySql>::new(r#"{{ table.insert_sql }}"#);
         qb.push_values({{ table.name }}_array, |mut b, {{ table.name }}| {
 {%- for column in table.columns %}
